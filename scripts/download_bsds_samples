@@ -1,1 +1,145 @@
+#!/usr/bin/env python3
+"""Download the official BSDS500 archive and extract four project samples.
+
+The script intentionally writes only the selected image/ground-truth pairs into
+`data/bsds/` and does not add them to Git. Run it from anywhere; paths are
+resolved relative to the repository root.
+"""
+
+from __future__ import annotations
+
+import argparse
+import shutil
+import sys
+import tarfile
+import tempfile
+import urllib.request
+from pathlib import Path
+
+ARCHIVE_URL = (
+    "https://www2.eecs.berkeley.edu/Research/Projects/CS/vision/"
+    "grouping/BSR/BSR_bsds500.tgz"
+)
+SAMPLE_IDS = ("100007", "100039", "101027", "102062")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_OUTPUT = REPO_ROOT / "data" / "bsds"
+
+
+def _download(url: str, destination: Path) -> None:
+    print(f"Downloading BSDS500 from:\n  {url}")
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=120) as response, destination.open("wb") as out:
+        total = response.headers.get("Content-Length")
+        total_bytes = int(total) if total and total.isdigit() else None
+        copied = 0
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
+            copied += len(chunk)
+            if total_bytes:
+                pct = 100.0 * copied / total_bytes
+                print(f"\r  {copied / 2**20:7.1f} MiB / {total_bytes / 2**20:7.1f} MiB ({pct:5.1f}%)", end="")
+            else:
+                print(f"\r  {copied / 2**20:7.1f} MiB", end="")
+    print()
+
+
+def _find_member(members: list[tarfile.TarInfo], sample_id: str, suffix: str) -> tarfile.TarInfo:
+    candidates = [
+        m for m in members
+        if m.isfile() and Path(m.name).name.lower() == f"{sample_id}{suffix}".lower()
+    ]
+    if not candidates:
+        raise FileNotFoundError(f"Could not find {sample_id}{suffix} in the BSDS500 archive")
+
+    # Prefer canonical BSDS500 image/groundTruth paths if multiple names exist.
+    preferred_tokens = ("BSDS500/data/images", "BSDS500/data/groundTruth")
+    candidates.sort(key=lambda m: (not any(t in m.name for t in preferred_tokens), len(m.name)))
+    return candidates[0]
+
+
+def _copy_member(archive: tarfile.TarFile, member: tarfile.TarInfo, destination: Path) -> None:
+    fileobj = archive.extractfile(member)
+    if fileobj is None:
+        raise OSError(f"Could not read archive member: {member.name}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with fileobj, destination.open("wb") as out:
+        shutil.copyfileobj(fileobj, out)
+
+
+def extract_samples(archive_path: Path, output_dir: Path) -> None:
+    images_dir = output_dir / "images"
+    gt_dir = output_dir / "gt"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    gt_dir.mkdir(parents=True, exist_ok=True)
+
+    with tarfile.open(archive_path, mode="r:gz") as archive:
+        members = archive.getmembers()
+        for sample_id in SAMPLE_IDS:
+            image_member = _find_member(members, sample_id, ".jpg")
+            gt_member = _find_member(members, sample_id, ".mat")
+            _copy_member(archive, image_member, images_dir / f"{sample_id}.jpg")
+            _copy_member(archive, gt_member, gt_dir / f"{sample_id}.mat")
+            print(f"Extracted {sample_id}: {image_member.name} + {gt_member.name}")
+
+
+def verify(output_dir: Path) -> bool:
+    missing: list[Path] = []
+    for sample_id in SAMPLE_IDS:
+        for path in (
+            output_dir / "images" / f"{sample_id}.jpg",
+            output_dir / "gt" / f"{sample_id}.mat",
+        ):
+            if not path.is_file() or path.stat().st_size == 0:
+                missing.append(path)
+    if missing:
+        print("Missing files:", file=sys.stderr)
+        for path in missing:
+            print(f"  {path}", file=sys.stderr)
+        return False
+    print(f"BSDS sample setup complete: {output_dir}")
+    return True
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+        help=f"Output directory (default: {DEFAULT_OUTPUT})",
+    )
+    parser.add_argument(
+        "--archive",
+        type=Path,
+        default=None,
+        help="Use an existing BSR_bsds500.tgz instead of downloading it.",
+    )
+    args = parser.parse_args()
+
+    output_dir = args.output.expanduser().resolve()
+
+    if args.archive is not None:
+        archive_path = args.archive.expanduser().resolve()
+        if not archive_path.is_file():
+            parser.error(f"Archive not found: {archive_path}")
+        extract_samples(archive_path, output_dir)
+        return 0 if verify(output_dir) else 1
+
+    with tempfile.TemporaryDirectory(prefix="bsds500_") as tmp:
+        archive_path = Path(tmp) / "BSR_bsds500.tgz"
+        try:
+            _download(ARCHIVE_URL, archive_path)
+            extract_samples(archive_path, output_dir)
+        except Exception as exc:
+            print(f"BSDS setup failed: {exc}", file=sys.stderr)
+            return 1
+
+    return 0 if verify(output_dir) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
