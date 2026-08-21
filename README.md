@@ -48,8 +48,9 @@ classical-cv-course-project/
     └── README.md
 ```
 
-Dataset imagery is not embedded in this repository version;
-plots are regenerated on execution.
+The original course notebook is preserved unchanged, including its saved
+outputs. Raw BSDS500 dataset files are not distributed separately in this
+repository.
 
 ## Setup
 
@@ -119,7 +120,7 @@ for deterministic random experiments where applicable.
 
 - The saved text outputs come from the original course-project run using four local BSDS500 samples.
 - The original notebook is preserved in its course-project form, including saved outputs from the original experiments.
-- - The counting benchmark is synthetic and uses known ground-truth counts/masks.
+- The counting benchmark is synthetic and uses known ground-truth counts/masks.
 - Learned comparisons are deliberately lightweight and implemented without pretrained external checkpoints.
 - The reported results are intended to demonstrate methodology, ablation design, and analysis rather than claim benchmark leadership.
 
